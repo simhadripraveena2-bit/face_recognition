@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>Face Recognization — Demo</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 2rem auto; }
+    .card { padding: 1rem; border: 1px solid #ddd; border-radius: 6px; }
+    .result { margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <h1>Face Recognization — Demo</h1>
+  <div class="card">
+    <form action="/upload/" method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      <label>Select an image (jpg/png):</label><br/><br/>
+      <input type="file" name="image" accept="image/*" required /><br/><br/>
+      <button type="submit">Upload & Predict</button>
+    </form>
+  </div>
+
+  {% if result %}
+  <div class="card result">
+    <h3>Result</h3>
+    <pre>{{ result|safe }}</pre>
+    {% if result.predictions %}
+      <ul>
+      {% for p in result.predictions %}
+        <li><b>{{ p.name }}</b> — confidence {{ p.score|floatformat:2 }}</li>
+      {% endfor %}
+      </ul>
+    {% endif %}
+    {% if result.error %}
+      <p style="color:red">{{ result.error }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+</body>
+</html>
