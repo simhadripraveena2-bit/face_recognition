@@ -8,7 +8,7 @@ from facenet_pytorch import InceptionResnetV1
 
 try:
     import mediapipe as mp
-except Exception:  # mediapipe is optional at runtime
+except Exception:  # mediapipe optional
     mp = None
 
 
@@ -38,12 +38,8 @@ def _distance(p1: np.ndarray, p2: np.ndarray) -> float:
     return float(np.linalg.norm(p1 - p2))
 
 
-def extract_geometric_features_from_image(image: Image.Image) -> Optional[np.ndarray]:
-    """
-    Returns normalized geometric vector:
-      [eye_distance, nose_to_mouth, ear_to_ear, face_height, face_width]
-    normalized by face_width.
-    """
+def extract_geometric_analysis_from_image(image: Image.Image) -> dict:
+    """Return landmarks + normalized distances used for geometric features."""
     rgb = np.array(image.convert('RGB'))
     h, w = rgb.shape[:2]
 
@@ -53,41 +49,62 @@ def extract_geometric_features_from_image(image: Image.Image) -> Optional[np.nda
         face_mesh.close()
         if result.multi_face_landmarks:
             lms = result.multi_face_landmarks[0].landmark
+            points = {
+                "left_eye": _landmark_xy(lms, 33, w, h),
+                "right_eye": _landmark_xy(lms, 263, w, h),
+                "nose_tip": _landmark_xy(lms, 1, w, h),
+                "mouth_left": _landmark_xy(lms, 61, w, h),
+                "mouth_right": _landmark_xy(lms, 291, w, h),
+                "left_jaw": _landmark_xy(lms, 234, w, h),
+                "right_jaw": _landmark_xy(lms, 454, w, h),
+                "chin": _landmark_xy(lms, 152, w, h),
+                "forehead": _landmark_xy(lms, 10, w, h),
+            }
+            points["mouth_center"] = (points["mouth_left"] + points["mouth_right"]) / 2.0
 
-            left_eye = _landmark_xy(lms, 33, w, h)
-            right_eye = _landmark_xy(lms, 263, w, h)
-            nose_tip = _landmark_xy(lms, 1, w, h)
-            mouth_left = _landmark_xy(lms, 61, w, h)
-            mouth_right = _landmark_xy(lms, 291, w, h)
-            mouth_center = (mouth_left + mouth_right) / 2.0
-            left_ear = _landmark_xy(lms, 234, w, h)
-            right_ear = _landmark_xy(lms, 454, w, h)
-            chin = _landmark_xy(lms, 152, w, h)
-            forehead = _landmark_xy(lms, 10, w, h)
-            left_jaw = _landmark_xy(lms, 234, w, h)
-            right_jaw = _landmark_xy(lms, 454, w, h)
+            face_width = max(_distance(points["left_jaw"], points["right_jaw"]), 1e-6)
+            distances = {
+                "eye_distance": _distance(points["left_eye"], points["right_eye"]) / face_width,
+                "nose_to_mouth": _distance(points["nose_tip"], points["mouth_center"]) / face_width,
+                "ear_to_ear": _distance(points["left_jaw"], points["right_jaw"]) / face_width,
+                "face_height": _distance(points["chin"], points["forehead"]) / face_width,
+                "face_width": _distance(points["left_jaw"], points["right_jaw"]) / face_width,
+            }
+            return {
+                "landmarks": {k: v.tolist() for k, v in points.items()},
+                "distances": distances,
+                "vector": np.array([
+                    distances["eye_distance"],
+                    distances["nose_to_mouth"],
+                    distances["ear_to_ear"],
+                    distances["face_height"],
+                    distances["face_width"],
+                ], dtype=np.float32),
+            }
 
-            face_width = max(_distance(left_jaw, right_jaw), 1e-6)
-            features = np.array([
-                _distance(left_eye, right_eye) / face_width,
-                _distance(nose_tip, mouth_center) / face_width,
-                _distance(left_ear, right_ear) / face_width,
-                _distance(chin, forehead) / face_width,
-                face_width / face_width,
-            ], dtype=np.float32)
-            return features
-
-    # Fallback if mediapipe unavailable or no landmarks found
-    # Use whole image geometry as safe defaults so pipeline still works.
     face_width = float(max(w, 1))
-    features = np.array([
-        0.35,  # approximate normalized eye distance
-        0.20,  # approximate normalized nose-mouth distance
-        0.90,  # approximate ear-ear distance
-        float(h) / face_width,
-        1.0,
-    ], dtype=np.float32)
-    return features
+    fallback = {
+        "eye_distance": 0.35,
+        "nose_to_mouth": 0.20,
+        "ear_to_ear": 0.90,
+        "face_height": float(h) / face_width,
+        "face_width": 1.0,
+    }
+    return {
+        "landmarks": {},
+        "distances": fallback,
+        "vector": np.array([
+            fallback["eye_distance"],
+            fallback["nose_to_mouth"],
+            fallback["ear_to_ear"],
+            fallback["face_height"],
+            fallback["face_width"],
+        ], dtype=np.float32),
+    }
+
+
+def extract_geometric_features_from_image(image: Image.Image) -> Optional[np.ndarray]:
+    return extract_geometric_analysis_from_image(image)["vector"]
 
 
 def extract_geometric_features(img_path: str) -> Optional[np.ndarray]:

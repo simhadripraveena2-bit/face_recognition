@@ -78,10 +78,10 @@ async def embed(file: UploadFile = File(...)):
 
 
 @app.post("/predict/")
-async def predict(file: UploadFile = File(...), top_k: int = 3):
+async def predict(file: UploadFile = File(...), top_k: int = 3, enable_hybrid: bool = True):
     try:
         image = _read_image_from_upload(file)
-        result = predict_from_image_pil(image, top_k=top_k, embedding_weight=0.7, geometry_weight=0.3)
+        result = predict_from_image_pil(image, top_k=top_k, embedding_weight=0.7, geometry_weight=0.3, enable_hybrid=enable_hybrid)
         if "error" in result:
             return result
 

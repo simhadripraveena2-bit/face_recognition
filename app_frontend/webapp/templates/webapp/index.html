@@ -4,10 +4,14 @@
   <meta charset="utf-8"/>
   <title>Face Embedding — Demo</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 900px; margin: 2rem auto; }
+    body { font-family: Arial, sans-serif; max-width: 1100px; margin: 2rem auto; }
     .card { padding: 1rem; border: 1px solid #ddd; border-radius: 6px; }
     .result { margin-top: 1rem; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .row { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; }
+    .panel { background: #fafafa; border: 1px solid #e5e5e5; border-radius: 6px; padding: 0.75rem; }
+    .switch { display: inline-flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
+    canvas { width: 100%; border: 1px solid #ddd; border-radius: 6px; }
   </style>
 </head>
 <body>
@@ -16,14 +20,50 @@
     <form action="/upload/" method="post" enctype="multipart/form-data">
       {% csrf_token %}
       <label>Select an image (jpg/png):</label><br/><br/>
-      <input type="file" name="image" accept="image/*" required /><br/><br/>
-      <button type="submit">Upload & Generate Embedding</button>
+      <input id="imageInput" type="file" name="image" accept="image/*" required /><br/>
+      <label class="switch">
+        <input type="checkbox" name="enable_hybrid" {% if enable_hybrid %}checked{% endif %}/>
+        <span>Enable Hybrid Recognition</span>
+      </label><br/><br/>
+      <button type="submit">Upload & Analyze</button>
     </form>
   </div>
 
   {% if result %}
   <div class="card result">
     <h3>Result</h3>
+    <div class="row">
+      <div>
+        <canvas id="overlayCanvas"></canvas>
+      </div>
+      <div class="panel">
+        <h4>Geometric Distances (normalized)</h4>
+        {% if result.geometry_distances %}
+        <ul>
+          <li>Eye distance: {{ result.geometry_distances.eye_distance|floatformat:4 }}</li>
+          <li>Nose to mouth: {{ result.geometry_distances.nose_to_mouth|floatformat:4 }}</li>
+          <li>Ear/Jaw width: {{ result.geometry_distances.ear_to_ear|floatformat:4 }}</li>
+          <li>Face height: {{ result.geometry_distances.face_height|floatformat:4 }}</li>
+          <li>Face width: {{ result.geometry_distances.face_width|floatformat:4 }}</li>
+        </ul>
+        {% elif result.geometry_features %}
+          <pre class="mono">{{ result.geometry_features }}</pre>
+        {% else %}
+          <p>No geometric data available.</p>
+        {% endif %}
+
+        {% if result.predictions %}
+          <h4>Similarity Scores</h4>
+          {% with top=result.predictions.0 %}
+          <ul>
+            <li>Embedding similarity: {{ top.embedding_similarity|default:"N/A" }}</li>
+            <li>Geometry similarity: {{ top.geometry_similarity|default:"N/A" }}</li>
+            <li>Final weighted score: {{ top.score|floatformat:4 }}</li>
+          </ul>
+          {% endwith %}
+        {% endif %}
+      </div>
+    </div>
 
     {% if result.embedding %}
       <p><b>Embedding dimension:</b> {{ result.embedding_dim }}</p>
@@ -35,7 +75,7 @@
       <p><b>Predictions:</b></p>
       <ul>
       {% for p in result.predictions %}
-        <li><b>{{ p.name }}</b> — confidence {{ p.score|floatformat:4 }}</li>
+        <li><b>{{ p.name }}</b> — score {{ p.score|floatformat:4 }}</li>
       {% endfor %}
       </ul>
     {% endif %}
@@ -49,6 +89,48 @@
       <pre>{{ result|safe }}</pre>
     </details>
   </div>
+  {% endif %}
+
+  {% if image_data_url and result.landmarks %}
+  <script>
+    (function () {
+      const imageSrc = "{{ image_data_url|escapejs }}";
+      const landmarks = {{ landmarks_json|safe }};
+      const canvas = document.getElementById("overlayCanvas");
+      const ctx = canvas.getContext("2d");
+      const img = new Image();
+      img.onload = function () {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        function drawPoint(p, color) {
+          if (!p) return;
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(p[0], p[1], 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        function drawLine(a, b, color) {
+          if (!a || !b) return;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(a[0], a[1]);
+          ctx.lineTo(b[0], b[1]);
+          ctx.stroke();
+        }
+
+        drawLine(landmarks.left_eye, landmarks.right_eye, "#2e7d32");
+        drawLine(landmarks.nose_tip, landmarks.mouth_center, "#1565c0");
+        drawLine(landmarks.left_jaw, landmarks.right_jaw, "#c62828");
+
+        Object.keys(landmarks).forEach((k) => drawPoint(landmarks[k], "#ff6f00"));
+      };
+      img.src = imageSrc;
+    })();
+  </script>
   {% endif %}
 </body>
 </html>

@@ -6,7 +6,7 @@ import torch
 from facenet_pytorch import InceptionResnetV1, MTCNN
 from PIL import Image
 
-from src.feature_extraction import extract_geometric_features_from_image
+from src.feature_extraction import extract_geometric_analysis_from_image
 
 MODEL_CHECKPOINT = os.getenv("MPD_CLASSIFIER_PATH", "models/classifier_checkpoint.pth")
 EMB_DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -55,7 +55,7 @@ def image_to_embedding(image: Image.Image) -> Optional[np.ndarray]:
 
 
 def image_to_geometric_features(image: Image.Image) -> Optional[np.ndarray]:
-    return extract_geometric_features_from_image(image)
+    return extract_geometric_analysis_from_image(image)["vector"]
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -63,7 +63,7 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / denom)
 
 
-def predict_from_image_pil(image: Image.Image, top_k: int = 3, embedding_weight: float = 0.7, geometry_weight: float = 0.3) -> dict:
+def predict_from_image_pil(image: Image.Image, top_k: int = 3, embedding_weight: float = 0.7, geometry_weight: float = 0.3, enable_hybrid: bool = True) -> dict:
     global _classifier, label2name
     if _classifier is None:
         load_classifier()
@@ -72,9 +72,8 @@ def predict_from_image_pil(image: Image.Image, top_k: int = 3, embedding_weight:
     if emb is None:
         return {"error": "No face found in the image."}
 
-    geo = image_to_geometric_features(image)
-    if geo is None:
-        geo = np.zeros(5, dtype=np.float32)
+    geometry_analysis = extract_geometric_analysis_from_image(image)
+    geo = geometry_analysis["vector"]
 
     combined = np.concatenate([emb, geo], axis=0)
     x = torch.tensor(combined, dtype=torch.float32).unsqueeze(0).to(EMB_DEVICE)
@@ -87,7 +86,7 @@ def predict_from_image_pil(image: Image.Image, top_k: int = 3, embedding_weight:
     emb_sims = None
     geo_sims = None
 
-    if _embedding_prototypes is not None and _geometry_prototypes is not None:
+    if enable_hybrid and _embedding_prototypes is not None and _geometry_prototypes is not None:
         emb_proto = np.asarray(_embedding_prototypes, dtype=np.float32)
         geo_proto = np.asarray(_geometry_prototypes, dtype=np.float32)
         emb_sims = np.array([_cosine_similarity(emb, p) for p in emb_proto], dtype=np.float32)
@@ -106,10 +105,9 @@ def predict_from_image_pil(image: Image.Image, top_k: int = 3, embedding_weight:
             "score": float(weighted_scores[idx]),
             "class_prob": float(cls_probs[idx]),
             "class_index": int(idx),
+            "embedding_similarity": float(emb_sims[idx]) if emb_sims is not None else None,
+            "geometry_similarity": float(geo_sims[idx]) if geo_sims is not None else None,
         }
-        if emb_sims is not None and geo_sims is not None:
-            item["embedding_similarity"] = float(emb_sims[idx])
-            item["geometry_similarity"] = float(geo_sims[idx])
         results.append(item)
 
     return {
@@ -117,4 +115,7 @@ def predict_from_image_pil(image: Image.Image, top_k: int = 3, embedding_weight:
         "embedding": emb.tolist(),
         "embedding_dim": int(emb.shape[0]),
         "geometry_features": geo.tolist(),
+        "geometry_distances": geometry_analysis["distances"],
+        "landmarks": geometry_analysis["landmarks"],
+        "hybrid_enabled": enable_hybrid,
     }
