@@ -139,3 +139,10 @@ Run backend (FastAPI)
 * Demonstrates expertise in deep learning for facial embeddings and recognition.
 * Implements end-to-end face embedding and recognition with production-ready deployment.
 * Full-stack integration shows ability to bridge ML research and practical application.
+
+## **🧪 Hybrid Evaluation Examples**
+See `docs/hybrid_fusion_examples.md` for:
+* example input image paths,
+* expected `/predict/` JSON output with name + scores,
+* an accuracy table format for embedding-only vs geometry-only vs hybrid reporting.
+

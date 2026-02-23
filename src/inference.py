@@ -25,7 +25,6 @@ _geo_dim = 12
 
 def load_classifier(checkpoint_path: str = MODEL_CHECKPOINT, num_classes: int = None, input_dim: int = None):
     global _classifier, label2name, _embedding_prototypes, _geometry_prototypes, _scaler_mean, _scaler_scale, _emb_dim, _geo_dim
-
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Classifier checkpoint not found at {checkpoint_path}")
 
@@ -66,6 +65,7 @@ def image_to_embedding(image: Image.Image):
         emb = resnet(face_tensor).cpu().numpy().squeeze().astype(np.float32)
     return emb
 
+
 def image_to_geometric_features(image: Image.Image):
     return extract_geometric_analysis_from_image(image)["vector"]
 
@@ -73,6 +73,7 @@ def image_to_geometric_features(image: Image.Image):
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     denom = (np.linalg.norm(a) * np.linalg.norm(b)) + 1e-8
     return float(np.dot(a, b) / denom)
+
 
 def _apply_scaler(x: np.ndarray) -> np.ndarray:
     if _scaler_mean is None or _scaler_scale is None:
@@ -93,6 +94,7 @@ def predict_from_image_pil(image: Image.Image, top_k: int = 3, enable_hybrid: bo
 
     geometry_analysis = extract_geometric_analysis_from_image(image)
     geo = geometry_analysis["vector"]
+
     combined_raw = np.concatenate([emb, geo], axis=0).astype(np.float32)
     combined = _apply_scaler(combined_raw)
 
@@ -100,6 +102,7 @@ def predict_from_image_pil(image: Image.Image, top_k: int = 3, enable_hybrid: bo
     with torch.no_grad():
         logits = _classifier(x)
         cls_probs = torch.softmax(logits, dim=1).cpu().numpy().squeeze()
+
     emb_sims, geo_sims = None, None
     if _embedding_prototypes is not None and _geometry_prototypes is not None:
         emb_part = combined[:_emb_dim]

@@ -7,4 +7,3 @@ torch
 numpy
 mediapipe
 matplotlib
-

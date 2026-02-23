@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from PIL import Image
 from facenet_pytorch import InceptionResnetV1
+
 from src.face_pipeline import DEVICE, get_aligned_face_tensor
 
 resnet = InceptionResnetV1(pretrained='vggface2').eval().to(DEVICE)
@@ -117,6 +118,7 @@ def extract_geometric_features_from_image(image: Image.Image):
 
 def extract_geometric_features(img_path: str):
     return extract_geometric_features_from_image(Image.open(img_path).convert('RGB'))
+
 
 def process_dataset(input_dir: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
