@@ -1,80 +1,69 @@
-# src/inference.py
 import os
-import torch
-import numpy as np
-from facenet_pytorch import MTCNN, InceptionResnetV1
-from PIL import Image
-from typing import Tuple
+from typing import Optional
 
-# Paths (relative to repo root)
+import numpy as np
+import torch
+from facenet_pytorch import InceptionResnetV1, MTCNN
+from PIL import Image
+
+from src.feature_extraction import extract_geometric_analysis_from_image
+
 MODEL_CHECKPOINT = os.getenv("MPD_CLASSIFIER_PATH", "models/classifier_checkpoint.pth")
 EMB_DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-# Initialize detector & embedding model
 mtcnn = MTCNN(image_size=160, margin=0, min_face_size=20, device=EMB_DEVICE)
 resnet = InceptionResnetV1(pretrained='vggface2').eval().to(EMB_DEVICE)
 
-# Classifier will be loaded lazily
 _classifier = None
-label2name = {}  # filled from dataset folder structure or from checkpoint
+label2name = {}
+_embedding_prototypes = None
+_geometry_prototypes = None
 
-def load_classifier(checkpoint_path: str = MODEL_CHECKPOINT, num_classes: int = None, input_dim: int = 512):
-    """
-    Loads classifier checkpoint. The checkpoint should contain:
-     - 'state_dict' : model state dict
-     - 'label2name' : mapping idx -> person_name (optional)
-    If checkpoint doesn't have label info, infer from data folder if possible.
-    """
-    global _classifier, label2name
+
+def load_classifier(checkpoint_path: str = MODEL_CHECKPOINT, num_classes: int = None, input_dim: int = 517):
+    global _classifier, label2name, _embedding_prototypes, _geometry_prototypes
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError(f"Classifier checkpoint not found at {checkpoint_path}")
 
     ckpt = torch.load(checkpoint_path, map_location=EMB_DEVICE)
-    # dynamic import of your FaceClassifier if using the same name
     from src.models import FaceClassifier
-    if 'num_classes' in ckpt:
-        nc = ckpt['num_classes']
-    else:
-        nc = num_classes if num_classes is not None else (ckpt.get('state_dict')['net.0.weight'].shape[0] if 'state_dict' in ckpt else None)
 
-    _classifier = FaceClassifier(input_dim=input_dim, hidden_dim=ckpt.get('hidden_dim', 256), num_classes=nc).to(EMB_DEVICE)
-    if 'state_dict' in ckpt:
-        _classifier.load_state_dict(ckpt['state_dict'])
-    else:
-        # If full model saved
-        try:
-            _classifier.load_state_dict(ckpt)
-        except Exception:
-            raise RuntimeError("Checkpoint format not recognized; expected dict with 'state_dict' or raw state_dict")
+    nc = ckpt.get('num_classes', num_classes)
+    _classifier = FaceClassifier(
+        input_dim=ckpt.get('input_dim', input_dim),
+        hidden_dim=ckpt.get('hidden_dim', 256),
+        num_classes=nc,
+    ).to(EMB_DEVICE)
+    _classifier.load_state_dict(ckpt['state_dict'] if 'state_dict' in ckpt else ckpt)
     _classifier.eval()
 
-    # load label mapping if provided
-    if 'label2name' in ckpt:
-        label2name = ckpt['label2name']
-    elif 'idx2label' in ckpt:
-        label2name = ckpt['idx2label']
-    # else will be filled by external code or remain empty
+    label2name = ckpt.get('label2name', ckpt.get('idx2label', {}))
+    _embedding_prototypes = ckpt.get('embedding_prototypes')
+    _geometry_prototypes = ckpt.get('geometry_prototypes')
 
-def image_to_embedding(image: Image.Image) -> np.ndarray:
-    """
-    Given a PIL image, detect largest face, return 512-d embedding (numpy).
-    """
-    # Convert to RGB PIL if not already
+
+def image_to_embedding(image: Image.Image) -> Optional[np.ndarray]:
     if image.mode != 'RGB':
         image = image.convert('RGB')
-    # face detection via mtcnn returns a torch tensor [3,160,160] or None
     face_tensor = mtcnn(np.array(image))
     if face_tensor is None:
         return None
     face_tensor = face_tensor.unsqueeze(0).to(EMB_DEVICE)
     with torch.no_grad():
-        emb = resnet(face_tensor).cpu().numpy().squeeze()  # shape (512,)
+        emb = resnet(face_tensor).cpu().numpy().squeeze().astype(np.float32)
     return emb
 
-def predict_from_image_pil(image: Image.Image, top_k: int = 3) -> dict:
-    """
-    Run full pipeline: detect face -> embedding -> classifier -> return top_k predictions (name, score)
-    """
+
+def image_to_geometric_features(image: Image.Image) -> Optional[np.ndarray]:
+    return extract_geometric_analysis_from_image(image)["vector"]
+
+
+def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    denom = (np.linalg.norm(a) * np.linalg.norm(b)) + 1e-8
+    return float(np.dot(a, b) / denom)
+
+
+def predict_from_image_pil(image: Image.Image, top_k: int = 3, embedding_weight: float = 0.7, geometry_weight: float = 0.3, enable_hybrid: bool = True) -> dict:
     global _classifier, label2name
     if _classifier is None:
         load_classifier()
@@ -83,15 +72,50 @@ def predict_from_image_pil(image: Image.Image, top_k: int = 3) -> dict:
     if emb is None:
         return {"error": "No face found in the image."}
 
-    x = torch.tensor(emb, dtype=torch.float32).unsqueeze(0).to(EMB_DEVICE)
+    geometry_analysis = extract_geometric_analysis_from_image(image)
+    geo = geometry_analysis["vector"]
+
+    combined = np.concatenate([emb, geo], axis=0)
+    x = torch.tensor(combined, dtype=torch.float32).unsqueeze(0).to(EMB_DEVICE)
+
     with torch.no_grad():
         logits = _classifier(x)
-        probs = torch.softmax(logits, dim=1).cpu().numpy().squeeze()  # (num_classes,)
+        cls_probs = torch.softmax(logits, dim=1).cpu().numpy().squeeze()
 
-    # get top_k
-    idx_sorted = np.argsort(probs)[::-1][:top_k]
+    weighted_scores = cls_probs.copy()
+    emb_sims = None
+    geo_sims = None
+
+    if enable_hybrid and _embedding_prototypes is not None and _geometry_prototypes is not None:
+        emb_proto = np.asarray(_embedding_prototypes, dtype=np.float32)
+        geo_proto = np.asarray(_geometry_prototypes, dtype=np.float32)
+        emb_sims = np.array([_cosine_similarity(emb, p) for p in emb_proto], dtype=np.float32)
+        geo_sims = np.array([_cosine_similarity(geo, p) for p in geo_proto], dtype=np.float32)
+
+        emb_norm = (emb_sims + 1.0) / 2.0
+        geo_norm = (geo_sims + 1.0) / 2.0
+        weighted_scores = embedding_weight * emb_norm + geometry_weight * geo_norm
+
+    idx_sorted = np.argsort(weighted_scores)[::-1][:top_k]
     results = []
     for idx in idx_sorted:
         name = label2name.get(str(idx), label2name.get(idx, f"class_{idx}"))
-        results.append({"name": name, "score": float(probs[idx]), "class_index": int(idx)})
-    return {"predictions": results}
+        item = {
+            "name": name,
+            "score": float(weighted_scores[idx]),
+            "class_prob": float(cls_probs[idx]),
+            "class_index": int(idx),
+            "embedding_similarity": float(emb_sims[idx]) if emb_sims is not None else None,
+            "geometry_similarity": float(geo_sims[idx]) if geo_sims is not None else None,
+        }
+        results.append(item)
+
+    return {
+        "predictions": results,
+        "embedding": emb.tolist(),
+        "embedding_dim": int(emb.shape[0]),
+        "geometry_features": geo.tolist(),
+        "geometry_distances": geometry_analysis["distances"],
+        "landmarks": geometry_analysis["landmarks"],
+        "hybrid_enabled": enable_hybrid,
+    }
