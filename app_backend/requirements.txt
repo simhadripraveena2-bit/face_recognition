@@ -5,3 +5,5 @@ pillow
 facenet-pytorch
 torch
 numpy
+mediapipe
+matplotlib

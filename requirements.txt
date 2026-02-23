@@ -5,3 +5,5 @@ opencv-python
 tqdm
 scikit-learn
 pillow
+mediapipe
+matplotlib

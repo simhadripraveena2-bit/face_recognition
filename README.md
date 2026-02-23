@@ -1,10 +1,10 @@
-# **🧠 Face Recognization System**
+# **🧠 Face Embedding System**
 
 ## **🔍 Overview**
 
-This project implements a full-stack face identification system using deep learning and web deployment.
+This project implements a full-stack face embedding and identification system using deep learning and web deployment.
 
-It uses the VGGFace2 dataset to train a face recognition model, capable of identifying individuals from images. The system includes:
+It uses the VGGFace2 dataset to train a face embedding model, capable of identifying individuals from images. The system includes:
 * ML Pipeline: Preprocessing, embedding extraction, classifier training, evaluation.
 * Web Application: FastAPI backend + Django frontend for real-time image uploads and identification.
 
@@ -60,7 +60,7 @@ missing_person_detection/
 [Kaggle Link](https://www.kaggle.com/datasets/hearfool/vggface2)
 * ~3.3 million images of 9,000+ individuals.
 * Each folder corresponds to one person with multiple images across pose, age, illumination, and expression.
-* Used to train a robust face recognition model, forming the foundation for missing-person identification.
+* Used to train a robust face embedding model, forming the foundation for missing-person identification.
 
 Note: For real-world deployment, this can be replaced with a specialized person dataset.
 
@@ -136,6 +136,13 @@ Run backend (FastAPI)
 * Confusion Matrix
 
 ## **🧑‍🔬 Research & Impact**
-* Demonstrates expertise in deep learning for facial recognition.
-* Implements end-to-end face recognition with production-ready deployment.
+* Demonstrates expertise in deep learning for facial embeddings and recognition.
+* Implements end-to-end face embedding and recognition with production-ready deployment.
 * Full-stack integration shows ability to bridge ML research and practical application.
+
+## **🧪 Hybrid Evaluation Examples**
+See `docs/hybrid_fusion_examples.md` for:
+* example input image paths,
+* expected `/predict/` JSON output with name + scores,
+* an accuracy table format for embedding-only vs geometry-only vs hybrid reporting.
+
