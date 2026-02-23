@@ -1,148 +1,218 @@
-# **🧠 Face Embedding System**
+# Face Recognition (Embedding + Geometry Hybrid)
 
-## **🔍 Overview**
+An end-to-end face recognition project with:
+- a **training pipeline** (crop faces → extract features → train classifier),
+- a **FastAPI backend** for `/embed/` and `/predict/`, and
+- a **Django frontend** for uploading images and viewing recognition results.
 
-This project implements a full-stack face embedding and identification system using deep learning and web deployment.
+The system combines:
+- **512-D deep face embeddings** (FaceNet/InceptionResnetV1), and
+- **geometric facial features** (MediaPipe landmarks-derived ratios/distances)
 
-It uses the VGGFace2 dataset to train a face embedding model, capable of identifying individuals from images. The system includes:
-* ML Pipeline: Preprocessing, embedding extraction, classifier training, evaluation.
-* Web Application: FastAPI backend + Django frontend for real-time image uploads and identification.
+for hybrid identity prediction.
 
-The integrated setup allows a user to upload an image, and the system will predict the person’s identity if present in the database
+---
 
-## **🏗️ Project Structure**
+## Project structure
 
-```
-missing_person_detection/
-├── data/
-│   └── vggface2/                     # VGGFace2 images organized by person/
+```text
+face_recognition/
+├── app.py                          # Compatibility entrypoint -> app_backend.main:app
+├── train.py                        # Compatibility entrypoint -> src.training.train_model
+├── model.py                        # Compatibility entrypoint -> src.models
+├── README.md
+├── requirements.txt
+│
 ├── models/
-│   └── classifier_checkpoint.pth     # Trained classifier checkpoint
+│   └── classifier_checkpoint.pth   # Saved hybrid classifier checkpoint
+│
 ├── src/
-│   ├── preprocessing.py              # Detect & crop faces
-│   ├── feature_extraction.py         # Generate embeddings with VGGFace2
-│   ├── datasets.py                   # PyTorch Dataset class
-│   ├── models.py                     # MLP classifier architecture
-│   ├── training.py                   # Training loop & checkpoint saving
-│   ├── evaluation.py                 # Accuracy
-│   ├── utils.py                      # Helper functions
-│   ├── main.py                       # Full ML pipeline
-│   └── inference.py                  # Model wrapper for serving
+│   ├── main.py                     # Local training/evaluation pipeline script
+│   ├── preprocessing.py            # Face detection + crop using MTCNN
+│   ├── feature_extraction.py       # Embeddings + geometric features extraction
+│   ├── face_pipeline.py            # Shared aligned-face utility
+│   ├── datasets.py                 # Dataset loader for .npy embeddings
+│   ├── models.py                   # FaceClassifier + HybridFusionClassifier
+│   ├── training.py                 # Hybrid training + checkpoint/prototype save
+│   ├── evaluation.py               # Accuracy evaluation helper
+│   ├── inference.py                # Runtime inference + top-k predictions
+│   └── utils.py
 │
 ├── app_backend/
-│   ├── main.py                       # FastAPI backend
-│   ├── requirements.txt              # Backend-specific dependencies
-│   └── model_store/                  # Optional folder for uploaded images
+│   ├── main.py                     # FastAPI app
+│   ├── requirements.txt
+│   └── face_features.db            # Auto-created SQLite table for extracted features
 │
 ├── app_frontend/
 │   ├── manage.py
-│   ├── requirements.txt              # Frontend dependencies
+│   ├── requirements.txt
 │   ├── frontend_project/
-│   │   ├── __init__.py
-│   │   ├── settings.py
-│   │   ├── urls.py
-│   │   └── wsgi.py
 │   └── webapp/
-│       ├── __init__.py
-│       ├── views.py
+│       ├── views.py                # Proxies upload to backend /embed or /predict
 │       ├── urls.py
-│       ├── templates/
-│       │   └── webapp/
-│       │       └── index.html
-│       └── static/
+│       └── templates/webapp/index.html
 │
-├── requirements.txt                  # Optional global dependencies
-└── README.md
+├── scripts/
+│   ├── evaluate_models.py          # Embedding vs geometry vs hybrid metrics
+│   ├── evaluate_benchmarks.py      # Simple rank-1 benchmark helper
+│   ├── visualize_features.py       # Landmark overlay + feature charts
+│   └── ablation_study.py           # Prototype shape/ablation summary
+│
+└── docs/
+    ├── research.md
+    └── hybrid_fusion_examples.md
 ```
 
-## **📦 Dataset Description**
-### VGGFace2 Dataset:
-[Kaggle Link](https://www.kaggle.com/datasets/hearfool/vggface2)
-* ~3.3 million images of 9,000+ individuals.
-* Each folder corresponds to one person with multiple images across pose, age, illumination, and expression.
-* Used to train a robust face embedding model, forming the foundation for missing-person identification.
+---
 
-Note: For real-world deployment, this can be replaced with a specialized person dataset.
+## How the pipeline works
 
-## **⚙️ How It Works**
+1. **Preprocessing** (`src/preprocessing.py`)
+   - Uses MTCNN to detect/crop faces from images organized by person folders.
 
-* Preprocessing (src/preprocessing.py)
-  * Detects faces using MTCNN. 
-  * Crops and resizes them to uniform dimensions.
-* Feature Extraction (src/feature_extraction.py)
-  * Converts cropped faces into 512-dimensional embeddings using pretrained VGGFace2 models.
-* Dataset Loading (src/datasets.py)
-  * Organizes embeddings and labels into PyTorch Dataset objects. 
-  * Supports train/validation/test splits.
-* Model Training (src/training.py)
-  * Defines a lightweight MLP classifier. 
-  * Uses cross-entropy loss and Adam optimizer. 
-  * Saves best model as models/classifier_checkpoint.pth.
-* Evaluation (src/evaluation.py)
-  * Computes accuracy, and confusion matrix for performance analysis.
-* Inference (src/inference.py)
-  * Loads the trained model checkpoint. 
-  * Accepts new images and predicts identity.
-* Backend (FastAPI) (app_backend/main.py)
-  * Accepts image uploads via HTTP POST. 
-  * Runs inference and returns predicted identity + confidence score.
-* Frontend (Django) (app_frontend/webapp/)
-  * Provides a simple web interface for uploading images. 
-  * Displays predicted identity returned by the backend.
-* Main Controller (src/main.py)
-  * Runs the full ML pipeline: preprocessing → embedding extraction → training → evaluation → launches backend API.
+2. **Feature extraction** (`src/feature_extraction.py`)
+   - Extracts a 512-dimensional embedding with `InceptionResnetV1(pretrained='vggface2')`.
+   - Extracts geometric features (landmark-based normalized distances/ratios) using MediaPipe FaceMesh.
+   - Saves per-image features as:
+     - `<sample>.npy` (embedding)
+     - `<sample>.geo.npy` (geometry)
 
-## **🧮 Training & Running the System**
+3. **Dataset + training** (`src/datasets.py`, `src/training.py`)
+   - Loads embedding and geometry vectors.
+   - Trains `HybridFusionClassifier` (embedding branch + geometry branch + gating fusion head).
+   - Saves best checkpoint to `models/classifier_checkpoint.pth`.
 
-#### Install dependencies
-```commandline
+4. **Inference API** (`app_backend/main.py`, `src/inference.py`)
+   - `/embed/`: returns embedding + geometry and stores feature rows in SQLite.
+   - `/predict/`: returns top-k predictions, scores, similarities, and detected landmarks.
+
+5. **Frontend UI** (`app_frontend/webapp/templates/webapp/index.html`)
+   - Upload image from browser.
+   - Toggle hybrid mode.
+   - View top predictions, geometric distances, and landmark overlay.
+
+---
+
+## Data layout expected
+
+Your raw dataset should be identity-folder style:
+
+```text
+data/
+└── vggface2/
+    ├── person_1/
+    │   ├── img1.jpg
+    │   └── img2.jpg
+    └── person_2/
+        └── img3.jpg
+```
+
+After preprocessing + extraction, features are expected in:
+
+```text
+data/embeddings/<person>/<sample>.npy
+data/embeddings/<person>/<sample>.geo.npy
+```
+
+---
+
+## Setup
+
+### 1) Install base dependencies
+
+```bash
 pip install -r requirements.txt
 ```
-#### Run the full pipeline
-```commandline
+
+### 2) (Optional) Install backend/frontend specific dependencies
+
+```bash
+pip install -r app_backend/requirements.txt
+pip install -r app_frontend/requirements.txt
+```
+
+---
+
+## Training / offline pipeline
+
+Run the main script:
+
+```bash
 python src/main.py
 ```
-* Trains the model.
-* Saves classifier_checkpoint.pth
 
-#### launch web app
-Run backend (FastAPI)
-  * From repo root, activate venv and install backend deps:
-  ```commandline
-    pip install -r app_backend/requirements.txt
-  ```
-  * Start backend:
-  ```commandline
-  uvicorn app_backend.main:app --reload --host 0.0.0.0 --port 8000
-  ```
-* Run frontend (Django)
-  * In a separate venv, install:
-  ```commandline
-  pip install -r app_frontend/requirements.txt
-  ```
-  * Start Django devserver:
-  ```commandline
-  cd app_frontend
-  python manage.py runserver 8001
-  ```
-#### Upload an image via the Django frontend 
-* Open http://127.0.0.1:8001/ and upload an image — backend should be running at http://127.0.0.1:8000/.
-* The system predicts the identity of the person in the image.
-* Returns the name
+This script is configured to:
+- crop faces from `data/vggface2` to `data/faces_cropped`,
+- extract embeddings/features into `data/embeddings`,
+- train a classifier,
+- print evaluation metrics.
 
-## **📊 Evaluation Metrics**
-* Accuracy
-* Classification Report
-* Confusion Matrix
+> Note: It expects the dataset folders to exist locally.
 
-## **🧑‍🔬 Research & Impact**
-* Demonstrates expertise in deep learning for facial embeddings and recognition.
-* Implements end-to-end face embedding and recognition with production-ready deployment.
-* Full-stack integration shows ability to bridge ML research and practical application.
+---
 
-## **🧪 Hybrid Evaluation Examples**
-See `docs/hybrid_fusion_examples.md` for:
-* example input image paths,
-* expected `/predict/` JSON output with name + scores,
-* an accuracy table format for embedding-only vs geometry-only vs hybrid reporting.
+## Run backend API
+
+```bash
+uvicorn app_backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### Endpoints
+
+- `POST /embed/`
+  - Input: image file
+  - Output: embedding vector, embedding dimension, geometry features
+
+- `POST /predict/?top_k=3&enable_hybrid=true`
+  - Input: image file
+  - Output: top-k predictions with score details, embedding, geometry distances, and landmarks
+
+---
+
+## Run frontend
+
+```bash
+cd app_frontend
+python manage.py runserver 8001
+```
+
+Open: `http://127.0.0.1:8001/`
+
+Make sure backend is already running on `http://127.0.0.1:8000/`.
+
+---
+
+## Evaluation & analysis scripts
+
+### Compare embedding vs geometry vs hybrid
+
+```bash
+python scripts/evaluate_models.py --emb_dir data/embeddings
+```
+
+Generates:
+- `artifacts/evaluation_results.csv`
+- `artifacts/evaluation_comparison.png`
+
+### Visualize landmarks and geometry feature magnitudes
+
+```bash
+python scripts/visualize_features.py --image path/to/face.jpg \
+  --overlay_out artifacts/landmark_overlay.png \
+  --importance_out artifacts/feature_importance.png
+```
+
+### Quick prototype ablation summary from checkpoint
+
+```bash
+python scripts/ablation_study.py --checkpoint models/classifier_checkpoint.pth
+```
+
+---
+
+## Notes
+
+- The backend creates/uses SQLite DB at `app_backend/face_features.db` to log extracted features.
+- You can use `app.py` as a compatibility ASGI entrypoint (`from app import app`).
+- `train.py` and `model.py` are compatibility modules that re-export training/model objects from `src/`.
 
