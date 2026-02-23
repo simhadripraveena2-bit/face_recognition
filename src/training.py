@@ -45,12 +45,10 @@ def _collect_class_prototypes(loader, num_classes, scaler, emb_dim=512, geo_dim=
     counts_safe = np.maximum(counts[:, None], 1)
     return emb_sums / counts_safe, geo_sums / counts_safe
 
-
 def train_model(train_loader, val_loader, num_classes, device, emb_dim=512, geo_dim=12):
     input_dim = emb_dim + geo_dim
     scaler = _fit_scaler(train_loader)
     model = HybridFusionClassifier(emb_dim=emb_dim, geo_dim=geo_dim, hidden_dim=256, num_classes=num_classes).to(device)
-
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
