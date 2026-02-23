@@ -2,38 +2,52 @@
 <html>
 <head>
   <meta charset="utf-8"/>
-  <title>Face Embedded — Demo</title>
+  <title>Face Embedding — Demo</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 800px; margin: 2rem auto; }
+    body { font-family: Arial, sans-serif; max-width: 900px; margin: 2rem auto; }
     .card { padding: 1rem; border: 1px solid #ddd; border-radius: 6px; }
     .result { margin-top: 1rem; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   </style>
 </head>
 <body>
-  <h1>Face Embedded — Demo</h1>
+  <h1>Face Embedding — Demo</h1>
   <div class="card">
     <form action="/upload/" method="post" enctype="multipart/form-data">
       {% csrf_token %}
       <label>Select an image (jpg/png):</label><br/><br/>
       <input type="file" name="image" accept="image/*" required /><br/><br/>
-      <button type="submit">Upload & Predict</button>
+      <button type="submit">Upload & Generate Embedding</button>
     </form>
   </div>
 
   {% if result %}
   <div class="card result">
     <h3>Result</h3>
-    <pre>{{ result|safe }}</pre>
+
+    {% if result.embedding %}
+      <p><b>Embedding dimension:</b> {{ result.embedding_dim }}</p>
+      <p><b>Embedding preview (first 10 values):</b></p>
+      <pre class="mono">{{ result.embedding|slice:":10" }}</pre>
+    {% endif %}
+
     {% if result.predictions %}
+      <p><b>Predictions:</b></p>
       <ul>
       {% for p in result.predictions %}
-        <li><b>{{ p.name }}</b> — confidence {{ p.score|floatformat:2 }}</li>
+        <li><b>{{ p.name }}</b> — confidence {{ p.score|floatformat:4 }}</li>
       {% endfor %}
       </ul>
     {% endif %}
+
     {% if result.error %}
       <p style="color:red">{{ result.error }}</p>
     {% endif %}
+
+    <details>
+      <summary>Raw response</summary>
+      <pre>{{ result|safe }}</pre>
+    </details>
   </div>
   {% endif %}
 </body>

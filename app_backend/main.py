@@ -1,38 +1,49 @@
-import io
-import os
-import cv2
-import numpy as np
-from fastapi import FastAPI, File, UploadFile
-from src.feature_extraction import extract_embedding
-from src.utils import identify_person
+from io import BytesIO
 
-app = FastAPI()
+from fastapi import FastAPI, File, UploadFile
+from PIL import Image
+
+from src.inference import image_to_embedding, predict_from_image_pil
+
+app = FastAPI(title="Face Embedding API")
+
+
+def _read_image_from_upload(file: UploadFile) -> Image.Image:
+    contents = file.file.read()
+    if not contents:
+        raise ValueError("Uploaded file is empty.")
+    image = Image.open(BytesIO(contents)).convert("RGB")
+    return image
+
+
+@app.post("/embed/")
+async def embed(file: UploadFile = File(...)):
+    try:
+        image = _read_image_from_upload(file)
+        embedding = image_to_embedding(image)
+        if embedding is None:
+            return {"error": "No face found in the image."}
+
+        vector = embedding.tolist()
+        return {
+            "embedding": vector,
+            "embedding_dim": len(vector),
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
+
 
 @app.post("/predict/")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...), top_k: int = 3):
     try:
-        # Read image bytes and decode
-        contents = await file.read()
-        npimg = np.frombuffer(contents, np.uint8)
-        img = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+        image = _read_image_from_upload(file)
+        result = predict_from_image_pil(image, top_k=top_k)
+        if "error" in result:
+            return result
 
-        # Convert to RGB for consistency with PIL-based model
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-        # Save temporarily (so we can reuse extract_embedding)
-        temp_path = "temp.jpg"
-        cv2.imwrite(temp_path, img_rgb)
-
-        # Extract embedding using pretrained model
-        emb = extract_embedding(temp_path)
-
-        # Identify the person
-        result = identify_person(emb)
-
-        return {
-            "name": result.get("name"),
-            "confidence": result.get("confidence")
-        }
-
-    except Exception as e:
-        return {"detail": str(e)}
+        embedding = image_to_embedding(image)
+        result["embedding"] = embedding.tolist() if embedding is not None else None
+        result["embedding_dim"] = len(result["embedding"]) if result["embedding"] else 0
+        return result
+    except Exception as exc:
+        return {"error": str(exc)}
