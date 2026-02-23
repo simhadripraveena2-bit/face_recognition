@@ -6,3 +6,5 @@ facenet-pytorch
 torch
 numpy
 mediapipe
+matplotlib
+

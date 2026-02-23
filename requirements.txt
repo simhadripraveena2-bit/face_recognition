@@ -6,3 +6,5 @@ tqdm
 scikit-learn
 pillow
 mediapipe
+matplotlib
+
